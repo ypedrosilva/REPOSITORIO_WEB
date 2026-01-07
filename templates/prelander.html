@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Carregando...</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            overflow: hidden;
+        }
+        
+        .container {
+            text-align: center;
+            padding: 2rem;
+            max-width: 500px;
+        }
+        
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid white;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 2rem;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+        
+        p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+            line-height: 1.6;
+        }
+        
+        .progress {
+            margin-top: 2rem;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="spinner"></div>
+        <h1>Preparando tudo para você...</h1>
+        <p>Aguarde um momento enquanto configuramos sua experiência personalizada.</p>
+        <div class="progress" id="progress">Carregando...</div>
+    </div>
+
+    <script>
+        // Capturar todos os parâmetros da URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const params = {};
+        
+        // Capturar parâmetros do Facebook
+        urlParams.forEach((value, key) => {
+            params[key] = value;
+        });
+        
+        // Capturar dados do navegador
+        params.useragent = navigator.userAgent;
+        params.screen_width = window.screen.width;
+        params.screen_height = window.screen.height;
+        params.language = navigator.language;
+        params.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        
+        // Obter IP via API (opcional, pode falhar)
+        async function getIP() {
+            try {
+                const response = await fetch('https://api.ipify.org?format=json');
+                const data = await response.json();
+                return data.ip;
+            } catch (error) {
+                return 'unknown';
+            }
+        }
+        
+        // Função principal
+        async function processAndRedirect() {
+            try {
+                // Atualizar progresso
+                document.getElementById('progress').textContent = 'Capturando dados...';
+                
+                // Obter IP
+                params.ip = await getIP();
+                
+                // Atualizar progresso
+                document.getElementById('progress').textContent = 'Salvando informações...';
+                
+                // Enviar dados para o servidor
+                const response = await fetch('/save-click', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(params)
+                });
+                
+                const data = await response.json();
+                
+                if (data.success && data.click_id) {
+                    // Atualizar progresso
+                    document.getElementById('progress').textContent = 'Redirecionando...';
+                    
+                    // Aguardar um pouco para garantir que os dados foram salvos
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    // Redirecionar para o bot do Telegram
+                    const botUsername = 'notorioussilvamines1bot'; // Será substituído pelo servidor
+                    window.location.href = `https://t.me/${data.bot_username}?start=${data.click_id}`;
+                } else {
+                    // Se falhar, redirecionar mesmo assim
+                    console.error('Erro ao salvar:', data);
+                    const botUsername = 'notorioussilvamines1bot';
+                    window.location.href = `https://t.me/${botUsername}`;
+                }
+            } catch (error) {
+                console.error('Erro:', error);
+                // Em caso de erro, redirecionar mesmo assim
+                const botUsername = 'notorioussilvamines1bot';
+                window.location.href = `https://t.me/${botUsername}`;
+            }
+        }
+        
+        // Iniciar processamento após carregar a página
+        window.addEventListener('load', () => {
+            setTimeout(processAndRedirect, 300);
+        });
+    </script>
+</body>
+</html>
+
