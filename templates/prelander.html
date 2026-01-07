@@ -146,8 +146,10 @@
         }
         
         // Iniciar processamento após carregar a página
+        // Aguardar mais tempo para garantir que a página seja exibida
         window.addEventListener('load', () => {
-            setTimeout(processAndRedirect, 300);
+            // Mostrar a pre-lander por pelo menos 2 segundos antes de processar
+            setTimeout(processAndRedirect, 2000);
         });
     </script>
 </body>
