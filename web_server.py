@@ -30,7 +30,7 @@ def get_db_connection():
         return None
 
 def init_database():
-    """Cria as tabelas se não existirem"""
+    """Cria as tabelas se não existirem e adiciona colunas faltantes"""
     conn = get_db_connection()
     if not conn:
         logger.error("Não foi possível conectar ao banco para inicializar")
@@ -51,14 +51,37 @@ def init_database():
                 sub3 TEXT,
                 sub4 TEXT,
                 sub5 TEXT,
-                screen_width TEXT,
-                screen_height TEXT,
-                language TEXT,
-                timezone TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 used BOOLEAN DEFAULT FALSE
             )
         ''')
+        
+        # Adicionar colunas novas se não existirem (migração)
+        columns_to_add = [
+            ('screen_width', 'TEXT'),
+            ('screen_height', 'TEXT'),
+            ('language', 'TEXT'),
+            ('timezone', 'TEXT')
+        ]
+        
+        # PostgreSQL não suporta IF NOT EXISTS em ALTER TABLE diretamente
+        # Vamos verificar se a coluna existe antes de adicionar
+        for column_name, column_type in columns_to_add:
+            try:
+                cursor.execute('''
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'clicks' AND column_name = %s
+                ''', (column_name,))
+                
+                if not cursor.fetchone():
+                    # Coluna não existe, adicionar
+                    cursor.execute(f'ALTER TABLE clicks ADD COLUMN {column_name} {column_type}')
+                    logger.info(f"Coluna {column_name} adicionada")
+                else:
+                    logger.debug(f"Coluna {column_name} já existe")
+            except Exception as e:
+                logger.warning(f"Erro ao verificar/adicionar coluna {column_name}: {e}")
         # Tabela de usuários
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
@@ -94,11 +117,41 @@ def save_click_data(click_id, fbclid, useragent, ip, fbb, sub1, sub2, sub3, sub4
     
     try:
         cursor = conn.cursor()
+        
+        # Verificar quais colunas existem na tabela
         cursor.execute('''
-            INSERT INTO clicks 
-            (click_id, fbclid, useragent, ip, fbb, sub1, sub2, sub3, sub4, sub5, screen_width, screen_height, language, timezone)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ''', (click_id, fbclid, useragent, ip, fbb, sub1, sub2, sub3, sub4, sub5, screen_width, screen_height, language, timezone))
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'clicks'
+        ''')
+        existing_columns = [row[0] for row in cursor.fetchall()]
+        
+        # Construir query baseado nas colunas existentes
+        base_columns = ['click_id', 'fbclid', 'useragent', 'ip', 'fbb', 'sub1', 'sub2', 'sub3', 'sub4', 'sub5']
+        base_values = [click_id, fbclid, useragent, ip, fbb, sub1, sub2, sub3, sub4, sub5]
+        
+        # Adicionar colunas opcionais se existirem
+        optional_columns = {
+            'screen_width': screen_width,
+            'screen_height': screen_height,
+            'language': language,
+            'timezone': timezone
+        }
+        
+        for col_name, col_value in optional_columns.items():
+            if col_name in existing_columns:
+                base_columns.append(col_name)
+                base_values.append(col_value)
+        
+        # Construir e executar query
+        columns_str = ', '.join(base_columns)
+        placeholders = ', '.join(['%s'] * len(base_columns))
+        
+        cursor.execute(f'''
+            INSERT INTO clicks ({columns_str})
+            VALUES ({placeholders})
+        ''', tuple(base_values))
+        
         conn.commit()
         logger.info(f"Clique {click_id} salvo no banco")
         return True
