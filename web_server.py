@@ -9,7 +9,8 @@ import uuid
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-app = Flask(__name__)
+# Configurar Flask para encontrar templates
+app = Flask(__name__, template_folder='templates')
 logger = logging.getLogger(__name__)
 
 # Configurações
@@ -127,7 +128,84 @@ else:
 @app.route('/')
 def prelander():
     """Exibe a pre-lander"""
-    return render_template('prelander.html')
+    logger.info("Rota / acessada - Servindo pre-lander")
+    try:
+        # Tentar renderizar o template
+        template_path = os.path.join(os.path.dirname(__file__), 'templates', 'prelander.html')
+        logger.info(f"Tentando carregar template de: {template_path}")
+        
+        if os.path.exists(template_path):
+            logger.info("Template encontrado, renderizando...")
+            return render_template('prelander.html')
+        else:
+            logger.warning(f"Template não encontrado em {template_path}, usando fallback")
+            raise FileNotFoundError(f"Template não encontrado")
+    except Exception as e:
+        logger.error(f"Erro ao renderizar template: {e}")
+        # Fallback: retornar HTML direto se template não for encontrado
+        logger.info("Usando HTML fallback")
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Carregando...</title>
+            <style>
+                body { font-family: Arial; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; justify-content: center; align-items: center; color: white; }
+                .spinner { border: 4px solid rgba(255,255,255,0.3); border-top: 4px solid white; border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite; margin: 0 auto 2rem; }
+                @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+            </style>
+        </head>
+        <body>
+            <div style="text-align: center;">
+                <div class="spinner"></div>
+                <h1>Preparando tudo para você...</h1>
+                <p>Aguarde um momento...</p>
+            </div>
+            <script>
+                const urlParams = new URLSearchParams(window.location.search);
+                const params = {};
+                urlParams.forEach((value, key) => { params[key] = value; });
+                params.useragent = navigator.userAgent;
+                params.screen_width = window.screen.width;
+                params.screen_height = window.screen.height;
+                params.language = navigator.language;
+                params.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                
+                async function getIP() {
+                    try {
+                        const response = await fetch('https://api.ipify.org?format=json');
+                        const data = await response.json();
+                        return data.ip;
+                    } catch { return 'unknown'; }
+                }
+                
+                async function processAndRedirect() {
+                    try {
+                        params.ip = await getIP();
+                        const response = await fetch('/save-click', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(params)
+                        });
+                        const data = await response.json();
+                        if (data.success && data.click_id) {
+                            await new Promise(r => setTimeout(r, 500));
+                            window.location.href = `https://t.me/${data.bot_username}?start=${data.click_id}`;
+                        } else {
+                            window.location.href = `https://t.me/notorioussilvamines1bot`;
+                        }
+                    } catch (error) {
+                        window.location.href = `https://t.me/notorioussilvamines1bot`;
+                    }
+                }
+                // Aguardar 2 segundos para mostrar a pre-lander
+                window.addEventListener('load', () => setTimeout(processAndRedirect, 2000));
+            </script>
+        </body>
+        </html>
+        """, 200
 
 @app.route('/save-click', methods=['POST'])
 def save_click():
