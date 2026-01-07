@@ -1,8 +1,8 @@
 """
-Servidor web que captura dados do Facebook Ads e redireciona para o bot do Telegram
+Servidor web com pre-lander que captura dados do Facebook Ads e redireciona para o bot do Telegram
 Usa PostgreSQL para armazenar dados dos cliques
 """
-from flask import Flask, request, redirect
+from flask import Flask, request, render_template, jsonify
 import os
 import logging
 import uuid
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 BOT_USERNAME = os.getenv('BOT_USERNAME', '')
 PORT = int(os.getenv('PORT', 5000))
 
-# Configuração do PostgreSQL (Railway fornece automaticamente)
+# Configuração do PostgreSQL
 DATABASE_URL = os.getenv('DATABASE_URL', '')
 
 def get_db_connection():
@@ -50,6 +50,10 @@ def init_database():
                 sub3 TEXT,
                 sub4 TEXT,
                 sub5 TEXT,
+                screen_width TEXT,
+                screen_height TEXT,
+                language TEXT,
+                timezone TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 used BOOLEAN DEFAULT FALSE
             )
@@ -81,7 +85,7 @@ def init_database():
     finally:
         conn.close()
 
-def save_click_data(click_id, fbclid, useragent, ip, fbb, sub1, sub2, sub3, sub4, sub5):
+def save_click_data(click_id, fbclid, useragent, ip, fbb, sub1, sub2, sub3, sub4, sub5, screen_width=None, screen_height=None, language=None, timezone=None):
     """Salva dados do clique no banco"""
     conn = get_db_connection()
     if not conn:
@@ -91,9 +95,9 @@ def save_click_data(click_id, fbclid, useragent, ip, fbb, sub1, sub2, sub3, sub4
         cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO clicks 
-            (click_id, fbclid, useragent, ip, fbb, sub1, sub2, sub3, sub4, sub5)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ''', (click_id, fbclid, useragent, ip, fbb, sub1, sub2, sub3, sub4, sub5))
+            (click_id, fbclid, useragent, ip, fbb, sub1, sub2, sub3, sub4, sub5, screen_width, screen_height, language, timezone)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ''', (click_id, fbclid, useragent, ip, fbb, sub1, sub2, sub3, sub4, sub5, screen_width, screen_height, language, timezone))
         conn.commit()
         logger.info(f"Clique {click_id} salvo no banco")
         return True
@@ -121,46 +125,71 @@ else:
     logger.warning("DATABASE_URL não configurado!")
 
 @app.route('/')
-def redirect_to_bot():
-    """Endpoint principal que captura dados e redireciona para o bot"""
+def prelander():
+    """Exibe a pre-lander"""
+    return render_template('prelander.html')
+
+@app.route('/save-click', methods=['POST'])
+def save_click():
+    """Endpoint que recebe dados do JavaScript e salva no banco"""
     
     if not BOT_USERNAME:
-        return "❌ BOT_USERNAME não configurado!", 500
+        return jsonify({"success": False, "error": "BOT_USERNAME não configurado"}), 500
     
     if not DATABASE_URL:
-        return "❌ DATABASE_URL não configurado!", 500
+        return jsonify({"success": False, "error": "DATABASE_URL não configurado"}), 500
     
-    # Gerar ID único para este clique
-    click_id = str(uuid.uuid4()).replace('-', '')[:12]
-    
-    # Capturar parâmetros da URL
-    fbclid = request.args.get('fbclid', '')
-    fbb = request.args.get('fbb', '')
-    sub1 = request.args.get('sub1', '')
-    sub2 = request.args.get('sub2', '')
-    sub3 = request.args.get('sub3', '')
-    sub4 = request.args.get('sub4', '')
-    sub5 = request.args.get('sub5', '')
-    
-    # Capturar dados do request
-    user_agent = request.headers.get('User-Agent', '')
-    client_ip = get_client_ip()
-    
-    # Salvar dados do clique no banco
-    save_click_data(click_id, fbclid, user_agent, client_ip, fbb, sub1, sub2, sub3, sub4, sub5)
-    
-    # Redirecionar para o bot com apenas o ID
-    telegram_url = f"https://t.me/{BOT_USERNAME}?start={click_id}"
-    
-    logger.info(f"Clique {click_id} - Redirecionando para Telegram")
-    
-    return redirect(telegram_url, code=302)
+    try:
+        # Receber dados do JavaScript
+        data = request.get_json()
+        
+        # Gerar ID único para este clique
+        click_id = str(uuid.uuid4()).replace('-', '')[:12]
+        
+        # Extrair dados
+        fbclid = data.get('fbclid', '')
+        fbb = data.get('fbb', '')
+        useragent = data.get('useragent', '')
+        ip = data.get('ip', get_client_ip())
+        sub1 = data.get('sub1', '')
+        sub2 = data.get('sub2', '')
+        sub3 = data.get('sub3', '')
+        sub4 = data.get('sub4', '')
+        sub5 = data.get('sub5', '')
+        screen_width = data.get('screen_width', '')
+        screen_height = data.get('screen_height', '')
+        language = data.get('language', '')
+        timezone = data.get('timezone', '')
+        
+        # Salvar dados do clique no banco
+        success = save_click_data(
+            click_id, fbclid, useragent, ip, fbb, 
+            sub1, sub2, sub3, sub4, sub5,
+            screen_width, screen_height, language, timezone
+        )
+        
+        if success:
+            logger.info(f"Clique {click_id} salvo - Redirecionando para Telegram")
+            return jsonify({
+                "success": True,
+                "click_id": click_id,
+                "bot_username": BOT_USERNAME
+            })
+        else:
+            return jsonify({"success": False, "error": "Erro ao salvar no banco"}), 500
+            
+    except Exception as e:
+        logger.error(f"Erro ao processar clique: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/health')
 def health():
     """Endpoint de health check"""
-    return {"status": "ok", "bot_username": BOT_USERNAME, "database": "connected" if DATABASE_URL else "not configured"}, 200
+    return jsonify({
+        "status": "ok", 
+        "bot_username": BOT_USERNAME, 
+        "database": "connected" if DATABASE_URL else "not configured"
+    }), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=PORT, debug=False)
-
